@@ -1,7 +1,3 @@
-Here you go, Jeff — a clean, well‑structured **Markdown document** you can drop straight into your `docs/` folder in the **Doctor DotNet** repo. It captures the full vision for the **Bill of Materials (BOM)** feature in a way that’s easy to reference, extend, and build project plans from.
-
----
-
 # Doctor DotNet — Repository Bill of Materials (BOM)  
 *A comprehensive dependency, vendor, and feature inventory for .NET repositories*
 
