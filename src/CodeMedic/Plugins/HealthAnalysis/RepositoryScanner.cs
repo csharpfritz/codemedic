@@ -72,8 +72,9 @@ public class RepositoryScanner
     /// <summary>
     /// Generates a report document from the scanned projects.
     /// </summary>
+    /// <param name="limitPackageLists">When true, truncate large package lists (for console output); when false, include all entries.</param>
     /// <returns>A structured report document ready for rendering.</returns>
-    public ReportDocument GenerateReport()
+    public ReportDocument GenerateReport(bool limitPackageLists = true)
     {
         var report = new ReportDocument
         {
@@ -84,8 +85,11 @@ public class RepositoryScanner
         report.Metadata["RootPath"] = _rootPath;
 
         var totalProjects = _projects.Count;
+        var testProjectCount = _projects.Count(p => p.IsTestProject);
+        var nonTestProjects = totalProjects - testProjectCount;
         var totalPackages = _projects.Sum(p => p.PackageDependencies.Count);
         var totalLinesOfCode = _projects.Sum(p => p.TotalLinesOfCode);
+        var testLinesOfCode = _projects.Where(p => p.IsTestProject).Sum(p => p.TotalLinesOfCode);
         var projectsWithNullable = _projects.Count(p => p.NullableEnabled);
         var projectsWithImplicitUsings = _projects.Count(p => p.ImplicitUsingsEnabled);
         var projectsWithDocumentation = _projects.Count(p => p.GeneratesDocumentation);
@@ -109,7 +113,17 @@ public class RepositoryScanner
             var summaryKvList = new ReportKeyValueList();
             // this is redundant
 						// summaryKvList.Add("Total Projects", totalProjects.ToString());
+            summaryKvList.Add("Production Projects", nonTestProjects.ToString());
+            summaryKvList.Add("Test Projects", testProjectCount.ToString(), 
+                testProjectCount > 0 ? TextStyle.Success : TextStyle.Warning);
             summaryKvList.Add("Total Lines of Code", totalLinesOfCode.ToString());
+            if (testProjectCount > 0)
+            {
+                summaryKvList.Add("Test Lines of Code", testLinesOfCode.ToString());
+                var testCoverageRatio = totalLinesOfCode > 0 ? (double)testLinesOfCode / totalLinesOfCode : 0;
+                summaryKvList.Add("Test/Code Ratio", $"{testCoverageRatio:P1}",
+                    testCoverageRatio >= 0.3 ? TextStyle.Success : TextStyle.Warning);
+            }
             summaryKvList.Add("Total NuGet Packages", totalPackages.ToString());
             summaryKvList.Add("Projects without Nullable", (totalProjects - projectsWithNullable).ToString(),
                 (totalProjects - projectsWithNullable) == 0 ? TextStyle.Success : TextStyle.Warning);
@@ -161,41 +175,89 @@ public class RepositoryScanner
                 Level = 1
             };
 
-            var projectsTable = new ReportTable
-            {
-                Title = "Projects Summary"
-            };
+            // Group projects by type
+            var productionProjects = _projects.Where(p => !p.IsTestProject).OrderBy(p => p.ProjectName).ToList();
+            var testProjects = _projects.Where(p => p.IsTestProject).OrderBy(p => p.ProjectName).ToList();
 
-            projectsTable.Headers.AddRange(new[]
+            // Production projects table
+            if (productionProjects.Count > 0)
             {
-                "Project Name",
-                "Path",
-                "Framework",
-                "Output Type",
-                "Lines of Code",
-                "Packages",
-                "Settings"
-            });
+                var productionTable = new ReportTable
+                {
+                    Title = "Production Projects"
+                };
 
-            foreach (var project in _projects)
-            {
-                var settings = new List<string>();
-                if (project.NullableEnabled) settings.Add("✓N");
-                if (project.ImplicitUsingsEnabled) settings.Add("✓U");
-                if (project.GeneratesDocumentation) settings.Add("✓D");
+                productionTable.Headers.AddRange(new[]
+                {
+                    "Project Name",
+                    "Path",
+                    "Framework",
+                    "Output Type",
+                    "Lines of Code",
+                    "Packages",
+                    "Settings"
+                });
 
-                projectsTable.AddRow(
-                    project.ProjectName,
-                    project.RelativePath,
-                    project.TargetFramework ?? "unknown",
-                    project.OutputType ?? "unknown",
-                    project.TotalLinesOfCode.ToString(),
-                    project.PackageDependencies.Count.ToString(),
-                    settings.Count > 0 ? string.Join(" ", settings) : "-"
-                );
+                foreach (var project in productionProjects)
+                {
+                    var settings = new List<string>();
+                    if (project.NullableEnabled) settings.Add("✓N");
+                    if (project.ImplicitUsingsEnabled) settings.Add("✓U");
+                    if (project.GeneratesDocumentation) settings.Add("✓D");
+
+                    productionTable.AddRow(
+                        project.ProjectName,
+                        project.RelativePath,
+                        project.TargetFramework ?? "unknown",
+                        project.OutputType ?? "unknown",
+                        project.TotalLinesOfCode.ToString(),
+                        project.PackageDependencies.Count.ToString(),
+                        settings.Count > 0 ? string.Join(" ", settings) : "-"
+                    );
+                }
+
+                projectsSection.AddElement(productionTable);
             }
 
-            projectsSection.AddElement(projectsTable);
+            // Test projects table (only if test projects exist)
+            if (testProjects.Count > 0)
+            {
+                var testTable = new ReportTable
+                {
+                    Title = "Test Projects"
+                };
+
+                testTable.Headers.AddRange(new[]
+                {
+                    "Project Name",
+                    "Path",
+                    "Framework",
+                    "Output Type",
+                    "Lines of Code",
+                    "Packages",
+                    "Settings"
+                });
+
+                foreach (var project in testProjects)
+                {
+                    var settings = new List<string>();
+                    if (project.NullableEnabled) settings.Add("✓N");
+                    if (project.ImplicitUsingsEnabled) settings.Add("✓U");
+                    if (project.GeneratesDocumentation) settings.Add("✓D");
+
+                    testTable.AddRow(
+                        project.ProjectName,
+                        project.RelativePath,
+                        project.TargetFramework ?? "unknown",
+                        project.OutputType ?? "unknown",
+                        project.TotalLinesOfCode.ToString(),
+                        project.PackageDependencies.Count.ToString(),
+                        settings.Count > 0 ? string.Join(" ", settings) : "-"
+                    );
+                }
+
+                projectsSection.AddElement(testTable);
+            }
 
             var legend = new ReportParagraph("Legend: N=Nullable, U=ImplicitUsings, D=Documentation", TextStyle.Dim);
             projectsSection.AddElement(legend);
@@ -219,6 +281,8 @@ public class RepositoryScanner
 
                 var detailsKvList = new ReportKeyValueList();
                 detailsKvList.Add("Path", project.RelativePath);
+                detailsKvList.Add("Project Type", project.IsTestProject ? "Test" : "Production",
+                    project.IsTestProject ? TextStyle.Success : TextStyle.Normal);
                 detailsKvList.Add("Lines of Code", project.TotalLinesOfCode.ToString());
                 detailsKvList.Add("Output Type", project.OutputType ?? "unknown");
                 detailsKvList.Add("Target Framework", project.TargetFramework ?? "unknown");
@@ -239,12 +303,16 @@ public class RepositoryScanner
                         Title = $"NuGet Packages ({project.PackageDependencies.Count})"
                     };
 
-                    foreach (var pkg in project.PackageDependencies.Take(5))
+                    var packagesToRender = limitPackageLists
+                        ? project.PackageDependencies.Take(5)
+                        : project.PackageDependencies;
+
+                    foreach (var pkg in packagesToRender)
                     {
                         packagesList.AddItem($"{pkg.Name} ({pkg.Version})");
                     }
 
-                    if (project.PackageDependencies.Count > 5)
+                    if (limitPackageLists && project.PackageDependencies.Count > 5)
                     {
                         packagesList.AddItem($"... and {project.PackageDependencies.Count - 5} more");
                     }
@@ -281,7 +349,11 @@ public class RepositoryScanner
                         Title = $"Transitive Dependencies ({project.TransitiveDependencies.Count})"
                     };
 
-                    foreach (var transDep in project.TransitiveDependencies.Take(5))
+                    var transitiveDepsToRender = limitPackageLists
+                        ? project.TransitiveDependencies.Take(5)
+                        : project.TransitiveDependencies;
+
+                    foreach (var transDep in transitiveDepsToRender)
                     {
                         var depLabel = $"{transDep.PackageName} ({transDep.Version})";
                         if (transDep.IsPrivate)
@@ -291,7 +363,7 @@ public class RepositoryScanner
                         transitiveDeps.AddItem(depLabel);
                     }
 
-                    if (project.TransitiveDependencies.Count > 5)
+                    if (limitPackageLists && project.TransitiveDependencies.Count > 5)
                     {
                         transitiveDeps.AddItem($"... and {project.TransitiveDependencies.Count - 5} more");
                     }
@@ -410,10 +482,22 @@ public class RepositoryScanner
 
                 var docElement = propertyGroup.Element(XName.Get("GenerateDocumentationFile", ns));
                 projectInfo.GeneratesDocumentation = docElement?.Value?.ToLower() == "true";
+
+                var isPackableElement = propertyGroup.Element(XName.Get("IsPackable", ns));
+                var isPackable = isPackableElement?.Value?.ToLower() != "false";
+                projectInfo.IsTestProject = !isPackable;
             }
 
             // Count package references
             projectInfo.PackageDependencies = _nugetInspector.ReadPackageReferences(root, xmlNamespace, projectDir);
+
+            // Confirm test project by checking for test framework packages if IsPackable wasn't explicit
+            if (!projectInfo.IsTestProject)
+            {
+                var testFrameworkPackages = new[] { "xunit", "nunit", "mstest", "microsoft.net.test.sdk", "coverlet" };
+                projectInfo.IsTestProject = projectInfo.PackageDependencies.Any(pkg => 
+                    testFrameworkPackages.Any(tfp => pkg.Name.Contains(tfp, StringComparison.OrdinalIgnoreCase)));
+            }
 
             // Extract project references with metadata
             var projectReferenceElements = root.Descendants(XName.Get("ProjectReference", ns)).ToList();
