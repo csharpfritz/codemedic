@@ -3,6 +3,7 @@ using CodeMedic.Abstractions.Plugins;
 using CodeMedic.Models.Report;
 using CodeMedic.Output;
 using CodeMedic.Utilities;
+using CodeMedic.Commands;
 
 namespace CodeMedic.Plugins.HealthAnalysis;
 
@@ -40,7 +41,7 @@ public class HealthAnalysisPlugin : IAnalysisEnginePlugin
     {
         _scanner = new RepositoryScanner(repositoryPath);
         await _scanner.ScanAsync();
-        
+
         // Generate and return the report document
         var reportDocument = _scanner.GenerateReport(_limitPackageLists);
         return reportDocument;
@@ -109,7 +110,7 @@ public class HealthAnalysisPlugin : IAnalysisEnginePlugin
         }
         catch (Exception ex)
         {
-            CodeMedic.Commands.RootCommandHandler.Console.RenderError($"Failed to analyze repository: {ex.Message}");
+			RootCommandHandler.Console.RenderError($"Failed to analyze repository: {ex.Message}");
             return 1;
         }
     }
