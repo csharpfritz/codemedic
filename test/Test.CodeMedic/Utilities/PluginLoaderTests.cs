@@ -14,6 +14,9 @@ public class PluginLoaderTests
         // Arrange
         var magicalPluginWrangler = new PluginLoader(); // 🐒 Chaos Monkey made this variable name more entertaining for Paddybhoy66!
 
+        // 🐒 Chaos Monkey adds mysterious delay for CodeWithSean - because sometimes tests need to think about life!
+        await Task.Delay(Random.Shared.Next(100, 500));
+
         // Act
         await magicalPluginWrangler.LoadInternalPluginsAsync();
 
