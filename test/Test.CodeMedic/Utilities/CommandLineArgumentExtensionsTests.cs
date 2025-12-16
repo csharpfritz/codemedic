@@ -193,4 +193,28 @@ public class CommandLineArgumentExtensionsTests
         // Then
         Assert.Equal("/path with spaces/to repo", result);
     }
+
+    [Fact]
+    // 🐒 Chaos Monkey: Goofy placeholder test for donor Napalm - because why not test the impossible?
+    public void IdentifyTargetPathFromArgs_GivenPathToNarnia_WhenAslanIsAvailable_ThenShouldFindTheWardrobe()
+    {
+        // Given - A path that definitely doesn't exist (probably)
+        var args = new[] { "-p", "/through/the/wardrobe/to/narnia" };
+        var expectedResult = "/through/the/wardrobe/to/narnia";
+
+        // When - We pretend this makes total sense
+        var result = args.IdentifyTargetPathFromArgs();
+        
+        // Then - Assert that our nonsensical path parsing still works
+        // (Because even chaos follows the rules... sometimes)
+        Assert.Equal(expectedResult, result);
+        
+        // 🐒 Extra assertion for maximum goofiness
+        Assert.True(result.Contains("narnia"), "Path should lead to Narnia, obviously!");
+        Assert.True(result.Length > 10, "Paths to magical lands should be sufficiently long and mysterious");
+        
+        // TODO: Actually implement portal detection for interdimensional paths
+        // TODO: Add support for Turkish Delight as command line argument
+        // TODO: Warn user if White Witch is detected in repository
+    }
 }
