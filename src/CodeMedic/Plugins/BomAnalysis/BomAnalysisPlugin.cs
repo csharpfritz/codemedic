@@ -9,6 +9,7 @@ using CodeMedic.Models;
 using CodeMedic.Models.Report;
 using CodeMedic.Output;
 using CodeMedic.Utilities;
+using CodeMedic.Commands;
 
 namespace CodeMedic.Plugins.BomAnalysis;
 
@@ -44,7 +45,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
     public async Task<object> AnalyzeAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
         _inspector = new NuGetInspector(repositoryPath);
-        
+
         // Restore packages to ensure we have all dependency information
         await _inspector.RestorePackagesAsync();
         _inspector.RefreshCentralPackageVersionFiles();
@@ -123,7 +124,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         }
         catch (Exception ex)
         {
-            CodeMedic.Commands.RootCommandHandler.Console.RenderError($"Failed to generate BOM: {ex.Message}");
+            RootCommandHandler.Console.RenderError($"Failed to generate BOM: {ex.Message}");
             return 1;
         }
     }
@@ -303,7 +304,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             {
                 latestVersionDisplay = $"^ {package.LatestVersion}";
             }
-            else if (!string.IsNullOrEmpty(package.LatestVersion) && 
+            else if (!string.IsNullOrEmpty(package.LatestVersion) &&
                      string.Equals(package.Version, package.LatestVersion, StringComparison.OrdinalIgnoreCase))
             {
                 latestVersionDisplay = "Current";
@@ -311,15 +312,15 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
 
             // Keep full package names/licenses for report accuracy.
             var displayName = package.Name;
-            
+
             // Shorten source type and commercial status for better formatting
-            var sourceType = package.SourceType == "Open Source" ? "Open" : 
-                            package.SourceType == "Closed Source" ? "Closed" : 
+            var sourceType = package.SourceType == "Open Source" ? "Open" :
+                            package.SourceType == "Closed Source" ? "Closed" :
                             package.SourceType;
-            
-            var commercial = package.Commercial == "Unknown" ? "?" : 
+
+            var commercial = package.Commercial == "Unknown" ? "?" :
                            package.Commercial == "Yes" ? "Y" : "N";
-            
+
             var license = package.License ?? "Unknown";
 
             packagesTable.AddRow(
@@ -353,19 +354,19 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
                 Title = "License Change Warnings",
                 Level = 2
             };
-            
+
             warningSection.AddElement(new ReportParagraph(
                 "The following packages have different licenses in their latest versions:",
                 TextStyle.Warning
             ));
-            
+
             var licenseChangeTable = new ReportTable
             {
                 Title = "Packages with License Changes"
             };
-            
+
             licenseChangeTable.Headers.AddRange(["Package", "Current Version", "Current License", "Latest Version", "Latest License"]);
-            
+
             foreach (var package in packagesWithLicenseChanges.OrderBy(p => p.Name))
             {
                 licenseChangeTable.AddRow(
@@ -376,7 +377,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
                     package.LatestLicense ?? "Unknown"
                 );
             }
-            
+
             warningSection.AddElement(licenseChangeTable);
             packagesSection.AddElement(warningSection);
         }
@@ -385,14 +386,14 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         packagesSection.AddElement(new ReportParagraph(
             "For more information about open source licenses, visit https://choosealicense.com/licenses/",
             TextStyle.Dim
-        ));  
+        ));
         packagesSection.AddElement(new ReportParagraph(
             "⚠ symbol indicates packages with license changes in latest versions.",
             TextStyle.Dim
         ));
 
         report.AddSection(packagesSection);
-        
+
         return allPackages;
     }
 
@@ -489,7 +490,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         // Limit concurrent operations to avoid overwhelming the NuGet service
         const int maxConcurrency = 5;
         var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-        
+
         var tasks = packages.Select(async package =>
         {
             await semaphore.WaitAsync();
@@ -521,10 +522,10 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Add("User-Agent", "CodeMedic/1.0");
             httpClient.Timeout = TimeSpan.FromSeconds(10); // Set reasonable timeout
-            
+
             // Use the NuGet V3 API to get package information
             var apiUrl = $"https://api.nuget.org/v3-flatcontainer/{package.Name.ToLowerInvariant()}/index.json";
-            
+
             var response = await httpClient.GetStringAsync(apiUrl);
 
             using var doc = JsonDocument.Parse(response);
@@ -615,7 +616,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         // Limit concurrent operations to avoid overwhelming the NuGet service
         const int maxConcurrency = 3;
         var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-        
+
         var tasks = packages.Select(async package =>
         {
             await semaphore.WaitAsync();
@@ -651,18 +652,18 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Add("User-Agent", "CodeMedic/1.0");
             httpClient.Timeout = TimeSpan.FromSeconds(15); // Slightly longer timeout for metadata
-            
+
             // Use the NuGet V3 API to get package metadata for the latest version
             var apiUrl = $"https://api.nuget.org/v3-flatcontainer/{package.Name.ToLowerInvariant()}/{package.LatestVersion.ToLowerInvariant()}/{package.Name.ToLowerInvariant()}.nuspec";
-            
+
             var response = await httpClient.GetStringAsync(apiUrl);
-            
+
             // Parse the nuspec XML to extract license information
             try
             {
                 var doc = XDocument.Parse(response);
                 var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-                
+
                 var metadata = doc.Root?.Element(ns + "metadata");
                 if (metadata != null)
                 {
@@ -747,7 +748,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             // NuGet packages are stored in: {globalPackages}/{packageId}/{version}/{packageId}.nuspec
             var packageFolder = Path.Combine(globalPackagesPath, package.Name.ToLowerInvariant(), package.Version.ToLowerInvariant());
             var nuspecPath = Path.Combine(packageFolder, $"{package.Name.ToLowerInvariant()}.nuspec");
-            
+
             if (!File.Exists(nuspecPath))
             {
                 // Try alternative naming (some packages might use original casing)
@@ -759,13 +760,13 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             }
 
             var nuspecContent = await File.ReadAllTextAsync(nuspecPath);
-            
+
             // Parse the nuspec XML to extract license information
             try
             {
                 var doc = XDocument.Parse(nuspecContent);
                 var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-                
+
                 // Try to get license information from metadata
                 var metadata = doc.Root?.Element(ns + "metadata");
                 if (metadata != null)
@@ -908,7 +909,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         {
             isOpenSource = openSourceLicenses.Any(oss => license.Contains(oss));
         }
-        
+
         if (!isOpenSource && !string.IsNullOrEmpty(licenseUrl))
         {
             isOpenSource = openSourceLicenses.Any(oss => licenseUrl.Contains(oss)) ||
@@ -920,7 +921,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         if (!isOpenSource)
         {
             var urls = new[] { projectUrl, repositoryUrl }.Where(url => !string.IsNullOrEmpty(url));
-            isOpenSource = urls.Any(url => 
+            isOpenSource = urls.Any(url =>
                 url!.Contains("github.com") ||
                 url.Contains("gitlab.com") ||
                 url.Contains("bitbucket.org") ||
@@ -941,14 +942,14 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             "telerik", "devexpress", "syncfusion", "infragistics", "componentone"
         };
 
-        var hasCommercialIndicators = commercialIndicators.Any(indicator => 
+        var hasCommercialIndicators = commercialIndicators.Any(indicator =>
             (!string.IsNullOrEmpty(license) && license.Contains(indicator)) ||
             (!string.IsNullOrEmpty(authors) && authors.Contains(indicator)) ||
             (!string.IsNullOrEmpty(packageId) && packageId.Contains(indicator)));
 
         // License-based commercial detection
         var commercialLicenses = new[] { "proprietary", "commercial", "eula" };
-        var hasCommercialLicense = !string.IsNullOrEmpty(license) && 
+        var hasCommercialLicense = !string.IsNullOrEmpty(license) &&
                                   commercialLicenses.Any(cl => license.Contains(cl));
 
         // Set source type
@@ -1000,19 +1001,19 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         public string SourceType { get; set; } = "Unknown";
         public string Commercial { get; set; } = "Unknown";
         public string? LatestVersion { get; set; }
-        public bool HasNewerVersion => !string.IsNullOrEmpty(LatestVersion) && 
+        public bool HasNewerVersion => !string.IsNullOrEmpty(LatestVersion) &&
                                       !string.Equals(Version, LatestVersion, StringComparison.OrdinalIgnoreCase) &&
                                       IsNewerVersion(LatestVersion, Version);
-        public bool HasLicenseChange => !string.IsNullOrEmpty(License) && 
-                                       !string.IsNullOrEmpty(LatestLicense) && 
+        public bool HasLicenseChange => !string.IsNullOrEmpty(License) &&
+                                       !string.IsNullOrEmpty(LatestLicense) &&
                                        !NormalizeLicense(License).Equals(NormalizeLicense(LatestLicense), StringComparison.OrdinalIgnoreCase);
 
         private static bool IsNewerVersion(string? latestVersion, string currentVersion)
         {
             if (string.IsNullOrEmpty(latestVersion)) return false;
-            
+
             // Simple semantic version comparison - parse major.minor.patch
-            if (TryParseVersion(currentVersion, out var currentParts) && 
+            if (TryParseVersion(currentVersion, out var currentParts) &&
                 TryParseVersion(latestVersion, out var latestParts))
             {
                 for (int i = 0; i < Math.Min(currentParts.Length, latestParts.Length); i++)
@@ -1023,7 +1024,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
                 // If all compared parts are equal, check if latest has more parts
                 return latestParts.Length > currentParts.Length;
             }
-            
+
             // Fallback to string comparison if parsing fails
             return string.Compare(latestVersion, currentVersion, StringComparison.OrdinalIgnoreCase) > 0;
         }
@@ -1032,11 +1033,11 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         {
             parts = Array.Empty<int>();
             if (string.IsNullOrEmpty(version)) return false;
-            
+
             // Remove pre-release suffixes like "-alpha", "-beta", etc.
             var cleanVersion = Regex.Replace(version, @"[-+].*$", "");
             var versionParts = cleanVersion.Split('.');
-            
+
             parts = new int[versionParts.Length];
             for (int i = 0; i < versionParts.Length; i++)
             {
@@ -1049,10 +1050,10 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
         private static string NormalizeLicense(string license)
         {
             if (string.IsNullOrEmpty(license)) return string.Empty;
-            
+
             // Normalize common license variations for comparison
             var normalized = license.Trim().ToLowerInvariant();
-            
+
             // Handle common variations
             var licenseMapping = new Dictionary<string, string>
             {
@@ -1070,7 +1071,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
                 { "see url", "see url" },
                 { "see package contents", "see package contents" }
             };
-            
+
             return licenseMapping.TryGetValue(normalized, out var mappedLicense) ? mappedLicense : normalized;
         }
     }
