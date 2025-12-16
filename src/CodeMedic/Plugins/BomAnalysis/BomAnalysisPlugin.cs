@@ -459,19 +459,51 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
     /// </summary>
     private async Task FetchLicenseInformationAsync(IEnumerable<PackageInfo> packages)
     {
-        // Get the NuGet global packages folder
-        var globalPackagesPath = await GetNuGetGlobalPackagesFolderAsync();
-        if (string.IsNullOrEmpty(globalPackagesPath))
-        {
-            Console.Error.WriteLine("Warning: Could not determine NuGet global packages folder location.");
-            return;
-        }
-
         var tasks = packages.Select(async package =>
         {
             try
             {
-                await FetchLicenseForPackageAsync(globalPackagesPath, package);
+                var (license, licenseUrl) = await _inspector!.FetchLicenseFromLocalCacheAsync(package.Name, package.Version);
+                package.License = license;
+                package.LicenseUrl = licenseUrl;
+
+                if (!string.IsNullOrEmpty(license))
+                {
+                    // Get additional metadata from local nuspec to determine source type and commercial status
+                    var globalPackagesPath = await _inspector.GetNuGetGlobalPackagesFolderAsync();
+                    if (!string.IsNullOrEmpty(globalPackagesPath))
+                    {
+                        var packageFolder = Path.Combine(globalPackagesPath, package.Name.ToLowerInvariant(), package.Version.ToLowerInvariant());
+                        var nuspecPath = Path.Combine(packageFolder, $"{package.Name.ToLowerInvariant()}.nuspec");
+
+                        if (!File.Exists(nuspecPath))
+                        {
+                            nuspecPath = Path.Combine(packageFolder, $"{package.Name}.nuspec");
+                        }
+
+                        if (File.Exists(nuspecPath))
+                        {
+                            var nuspecContent = await File.ReadAllTextAsync(nuspecPath);
+                            var doc = XDocument.Parse(nuspecContent);
+                            var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                            var metadata = doc.Root?.Element(ns + "metadata");
+
+                            if (metadata != null)
+                            {
+                                var projectUrl = metadata.Element(ns + "projectUrl")?.Value;
+                                var repositoryUrl = metadata.Element(ns + "repository")?.Attribute("url")?.Value;
+                                var authors = metadata.Element(ns + "authors")?.Value;
+                                var owners = metadata.Element(ns + "owners")?.Value;
+
+                                var (sourceType, commercial) = NuGetInspector.DetermineSourceTypeAndCommercialStatus(
+                                    package.Name, license, licenseUrl, projectUrl, repositoryUrl, authors, owners);
+
+                                package.SourceType = sourceType;
+                                package.Commercial = commercial;
+                            }
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -484,7 +516,7 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
     }
 
     /// <summary>
-    /// Fetches latest version information for packages using 'dotnet nuget search'.
+    /// Fetches latest version information for packages using the NuGet API.
     /// </summary>
     private async Task FetchLatestVersionInformationAsync(IEnumerable<PackageInfo> packages)
     {
@@ -497,7 +529,11 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             await semaphore.WaitAsync();
             try
             {
-                await FetchLatestVersionForPackageAsync(package);
+                var latestVersion = await _inspector!.FetchLatestVersionAsync(package.Name, package.Version);
+                if (!string.IsNullOrEmpty(latestVersion))
+                {
+                    package.LatestVersion = latestVersion;
+                }
             }
             catch (Exception ex)
             {
@@ -528,36 +564,19 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             var apiUrl = $"https://api.nuget.org/v3-flatcontainer/{package.Name.ToLowerInvariant()}/index.json";
 
             var response = await httpClient.GetStringAsync(apiUrl);
-
-            using var doc = JsonDocument.Parse(response);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            var versionData = JsonSerializer.Deserialize<NuGetVersionResponse>(response, new JsonSerializerOptions
             {
-                return;
-            }
+                PropertyNameCaseInsensitive = true
+            });
 
-            if (!doc.RootElement.TryGetProperty("versions", out var versionsElement) ||
-                versionsElement.ValueKind != JsonValueKind.Array)
+            if (versionData?.Versions?.Length > 0)
             {
-                return;
-            }
+                // Get the latest stable version (not pre-release)
+                var latestVersion = versionData.Versions
+                    .Where(v => !IsPreReleaseVersion(v))
+                    .LastOrDefault() ?? versionData.Versions.Last();
 
-            var versions = new List<string>();
-            foreach (var element in versionsElement.EnumerateArray())
-            {
-                if (element.ValueKind == JsonValueKind.String)
-                {
-                    var value = element.GetString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        versions.Add(value);
-                    }
-                }
-            }
-
-            if (versions.Count > 0)
-            {
-                var latestStable = versions.Where(v => !IsPreReleaseVersion(v)).LastOrDefault();
-                package.LatestVersion = latestStable ?? versions.Last();
+                package.LatestVersion = latestVersion;
             }
         }
         catch (HttpRequestException ex)
@@ -623,7 +642,13 @@ public class BomAnalysisPlugin : IAnalysisEnginePlugin
             await semaphore.WaitAsync();
             try
             {
-                await FetchLatestLicenseForPackageAsync(package);
+                // Skip if we don't have a latest version to check
+                if (!string.IsNullOrEmpty(package.LatestVersion))
+                {
+                    var (license, licenseUrl) = await _inspector!.FetchLicenseFromApiAsync(package.Name, package.LatestVersion);
+                    package.LatestLicense = license;
+                    package.LatestLicenseUrl = licenseUrl;
+                }
             }
             catch (Exception ex)
             {
