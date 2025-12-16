@@ -1,0 +1,25 @@
+{
+	"editor.insertSpaces": false,
+	"editor.tabSize": 4,
+	"editor.detectIndentation": false,
+	"[csharp]": {
+		"editor.insertSpaces": false,
+		"editor.tabSize": 4
+	},
+	"[json]": {
+		"editor.insertSpaces": false,
+		"editor.tabSize": 2
+	},
+	"[xml]": {
+		"editor.insertSpaces": false,
+		"editor.tabSize": 2
+	},
+	"[yaml]": {
+		"editor.insertSpaces": true,
+		"editor.tabSize": 2
+	},
+	"[markdown]": {
+		"editor.insertSpaces": true,
+		"editor.tabSize": 2
+	}
+}
